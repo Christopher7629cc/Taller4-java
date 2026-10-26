@@ -1,0 +1,16 @@
+# Resultado local del autograde (no se sube)
+resultado_autograde.json
+# Compilados
+out/
+*.class
+# IDEs
+.idea/
+*.iml
+.vscode/
+nbproject/private/
+.classpath
+.project
+.settings/
+# Sistema
+.DS_Store
+Thumbs.db

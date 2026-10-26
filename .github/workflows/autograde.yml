@@ -1,0 +1,65 @@
+name: Autograde Taller 4
+
+# Seguridad: se usa pull_request (NUNCA pull_request_target) y permisos minimos.
+# En PRs desde forks el token es de solo lectura: por eso NO se comenta en el PR;
+# el resultado queda en el Job Summary y en el artifact "resultado_autograde".
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  autograde:
+    # No correr en los push a main del repositorio del profesor (la plantilla vacia daria nota 0).
+    if: ${{ github.event_name != 'push' || github.repository != 'SarmientoEdu/Taller4-java' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Descargar el codigo de la rama del estudiante
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Instalar Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Obtener autograde y workflow OFICIALES (rama main del profesor) y comparar
+        run: |
+          set +e
+          BASE="https://raw.githubusercontent.com/SarmientoEdu/Taller4-java/main"
+          OFI="$RUNNER_TEMP/oficial"; mkdir -p "$OFI"
+          AG_FUENTE=local; AG_MODIFICADO=desconocido; WF_MODIFICADO=desconocido
+          if curl -fsSL --retry 3 --max-time 30 -o "$OFI/autograde.java" "$BASE/autograde.java" && [ -s "$OFI/autograde.java" ]; then
+            AG_FUENTE=descargado
+            if [ -f autograde.java ] && cmp -s <(tr -d '\r' < autograde.java) <(tr -d '\r' < "$OFI/autograde.java"); then AG_MODIFICADO=no; else AG_MODIFICADO=si; fi
+          fi
+          if curl -fsSL --retry 3 --max-time 30 -o "$OFI/autograde.yml" "$BASE/.github/workflows/autograde.yml" && [ -s "$OFI/autograde.yml" ]; then
+            if [ -f .github/workflows/autograde.yml ] && cmp -s <(tr -d '\r' < .github/workflows/autograde.yml) <(tr -d '\r' < "$OFI/autograde.yml"); then WF_MODIFICADO=no; else WF_MODIFICADO=si; fi
+          fi
+          { echo "AG_FUENTE=$AG_FUENTE"; echo "AG_MODIFICADO=$AG_MODIFICADO"; echo "WF_MODIFICADO=$WF_MODIFICADO"; } >> "$GITHUB_ENV"
+          echo "Fuente del autograde: $AG_FUENTE | autograde modificado: $AG_MODIFICADO | workflow modificado: $WF_MODIFICADO"
+          if [ "$AG_FUENTE" = "local" ]; then echo "::warning::No se pudo descargar el autograde oficial; se usara la copia local."; fi
+        shell: bash
+
+      - name: Ejecutar autograde (falla si la nota es menor a 60)
+        run: |
+          if [ "$AG_FUENTE" = "descargado" ]; then
+            java "$RUNNER_TEMP/oficial/autograde.java"
+          else
+            java autograde.java
+          fi
+
+      - name: Subir resultado como artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: resultado_autograde
+          path: resultado_autograde.json
+          if-no-files-found: warn
